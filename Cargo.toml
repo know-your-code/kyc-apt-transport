@@ -40,15 +40,17 @@ md-5 = "0.10"
 hex = "0.4"
 base64 = "0.22"
 
-# cargo-deb metadata. Packages the apt-method binary as
-# `apt-transport-kyc_<v>_<arch>.deb`. The .deb drops the binary at
-# /usr/lib/apt/methods/kyc — that path is what apt auto-discovers
-# the `kyc+https://` URL scheme from.
+# cargo-deb metadata. Packages the apt-method binary, the public GPG
+# keyring, and an example sources.list entry as
+# `apt-transport-kyc_<v>_<arch>.deb`. The .deb drops the method binary
+# at /usr/lib/apt/methods/kyc (apt auto-discovers the `kyc+https://`
+# URL scheme by filename) and the postinst maintainer script writes
+# /etc/apt/sources.list.d/kyc.list pointing at apt.knowyourco.de.
 #
-# Keyring file (kyc-keyring.gpg) and sources.list example are added
-# in a follow-up commit once the air-gapped GPG ceremony has
-# produced the keyring artifact — keeping this initial scaffold
-# pure-Rust.
+# End result: a fresh user runs two commands to install kyc —
+#   curl -fsSLO https://apt.knowyourco.de/install/apt-transport-kyc_<arch>.deb
+#   sudo apt install ./apt-transport-kyc_<arch>.deb
+# and then `sudo apt install kyc` works directly.
 [package.metadata.deb]
 name = "apt-transport-kyc"
 maintainer = "Botanica Software Labs <hello@knowyourco.de>"
@@ -57,10 +59,18 @@ depends = "libc6, ca-certificates"
 section = "admin"
 priority = "optional"
 extended-description = """\
-Adds the kyc+https:// URL scheme to apt. After installing this
-package and adding the kyc apt source, `apt install kyc` fetches
-licensed packages via a license-file bearer credential instead of
-making the repo world-readable."""
+Adds the kyc+https:// URL scheme to apt and registers the kyc apt
+source at apt.knowyourco.de. After installing this package, run
+`sudo apt update && sudo apt install kyc`. Licensed packages are
+fetched with a license-file bearer credential instead of the apt
+repo being world-readable."""
+maintainer-scripts = "debian/"
 assets = [
-    ["target/release/apt-transport-kyc", "usr/lib/apt/methods/kyc", "755"],
+    ["target/release/apt-transport-kyc", "usr/lib/apt/methods/kyc",                 "755"],
+    ["assets/kyc-keyring.gpg",           "usr/share/keyrings/kyc-keyring.gpg",      "644"],
+    # The example list file is also copied into /etc/apt/sources.list.d/
+    # by debian/postinst on first install. Keeping the source of truth
+    # in /usr/share/doc/ means `dpkg-reconfigure` or a manual reinstall
+    # can always recover the file.
+    ["assets/kyc.list",                  "usr/share/doc/apt-transport-kyc/kyc.list", "644"],
 ]

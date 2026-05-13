@@ -1,0 +1,1 @@
+deb [signed-by=/usr/share/keyrings/kyc-keyring.gpg] kyc+https://apt.knowyourco.de/ stable main

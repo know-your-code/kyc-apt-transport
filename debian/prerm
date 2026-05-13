@@ -1,0 +1,25 @@
+#!/bin/sh
+# Maintainer script for apt-transport-kyc.
+#
+# On purge, remove the kyc apt source we installed. On regular remove
+# (without --purge) the user keeps their source list — common Debian
+# convention for "I'm just swapping versions, don't blow away my config".
+
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        ;;
+
+    failed-upgrade)
+        ;;
+
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0
