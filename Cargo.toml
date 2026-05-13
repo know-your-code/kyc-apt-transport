@@ -40,17 +40,18 @@ md-5 = "0.10"
 hex = "0.4"
 base64 = "0.22"
 
-# cargo-deb metadata. Packages the apt-method binary, the public GPG
-# keyring, and an example sources.list entry as
-# `apt-transport-kyc_<v>_<arch>.deb`. The .deb drops the method binary
-# at /usr/lib/apt/methods/kyc (apt auto-discovers the `kyc+https://`
-# URL scheme by filename) and the postinst maintainer script writes
-# /etc/apt/sources.list.d/kyc.list pointing at apt.knowyourco.de.
+# cargo-deb metadata. Packages the apt-method binary ONLY. The .deb
+# drops it at /usr/lib/apt/methods/kyc; apt auto-discovers the
+# `kyc://` URL scheme by filename (the filename and the scheme must
+# match — that's why we use `kyc://` and not the compound form
+# `kyc+https://`, which would need `methods/kyc+https`).
 #
-# End result: a fresh user runs two commands to install kyc —
-#   curl -fsSLO https://apt.knowyourco.de/install/apt-transport-kyc_<arch>.deb
-#   sudo apt install ./apt-transport-kyc_<arch>.deb
-# and then `sudo apt install kyc` works directly.
+# We deliberately do NOT bundle the GPG keyring or write a sources
+# file from postinst — the install flow at knowyourco.de/download
+# follows Docker's pattern (user curls the key into
+# /etc/apt/keyrings/, then writes /etc/apt/sources.list.d/kyc.sources
+# with `tee`). This keeps the .deb minimal and the install path
+# explicit + auditable.
 [package.metadata.deb]
 name = "apt-transport-kyc"
 maintainer = "Botanica Software Labs <hello@knowyourco.de>"
@@ -59,18 +60,10 @@ depends = "libc6, ca-certificates"
 section = "admin"
 priority = "optional"
 extended-description = """\
-Adds the kyc+https:// URL scheme to apt and registers the kyc apt
-source at apt.knowyourco.de. After installing this package, run
-`sudo apt update && sudo apt install kyc`. Licensed packages are
-fetched with a license-file bearer credential instead of the apt
-repo being world-readable."""
-maintainer-scripts = "debian/"
+Adds the kyc:// URL scheme to apt. Required by the kyc apt source to
+fetch license-gated packages with an Authorization: Kyc-License
+bearer credential. See knowyourco.de/download for the full install
+flow (key trust + sources.list registration)."""
 assets = [
-    ["target/release/apt-transport-kyc", "usr/lib/apt/methods/kyc",                 "755"],
-    ["assets/kyc-keyring.gpg",           "usr/share/keyrings/kyc-keyring.gpg",      "644"],
-    # The example list file is also copied into /etc/apt/sources.list.d/
-    # by debian/postinst on first install. Keeping the source of truth
-    # in /usr/share/doc/ means `dpkg-reconfigure` or a manual reinstall
-    # can always recover the file.
-    ["assets/kyc.list",                  "usr/share/doc/apt-transport-kyc/kyc.list", "644"],
+    ["target/release/apt-transport-kyc", "usr/lib/apt/methods/kyc", "755"],
 ]

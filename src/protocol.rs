@@ -47,7 +47,7 @@ pub enum AptRequest {
 
 #[derive(Debug, Clone)]
 pub struct UriAcquire {
-    /// Full URI as apt understands it (e.g. `kyc+https://apt.knowyourco.de/pool/...`).
+    /// Full URI as apt understands it (e.g. `kyc://apt.knowyourco.de/pool/...`).
     /// Percent-escapes have been decoded by [`parse_request`] before
     /// the struct lands here.
     pub uri: String,
@@ -311,7 +311,7 @@ mod tests {
     #[test]
     fn parses_uri_acquire() {
         let mut input = std::io::Cursor::new(
-            b"600 URI Acquire\nURI: kyc+https://apt.knowyourco.de/pool/main/k/kyc/kyc_0.2.5-1_amd64.deb\nFilename: /var/cache/apt/archives/partial/kyc_0.2.5-1_amd64.deb\nLast-Modified: Tue, 12 May 2026 15:29:39 GMT\n\n".to_vec(),
+            b"600 URI Acquire\nURI: kyc://apt.knowyourco.de/pool/main/k/kyc/kyc_0.2.5-1_amd64.deb\nFilename: /var/cache/apt/archives/partial/kyc_0.2.5-1_amd64.deb\nLast-Modified: Tue, 12 May 2026 15:29:39 GMT\n\n".to_vec(),
         );
         let req = read_request(&mut input).unwrap().unwrap();
         match req {
