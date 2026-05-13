@@ -1,0 +1,39 @@
+#!/bin/sh
+# Maintainer script for apt-transport-kyc.
+#
+# On install / upgrade, register the kyc apt source by copying the
+# example list file into /etc/apt/sources.list.d/. Refreshing the apt
+# index is intentionally NOT done here; dpkg holds locks during
+# postinst and `apt update` deadlocks. Users run `sudo apt update`
+# themselves (one extra line in the install instructions).
+#
+# `dh_installdeb` substitutes the variables below at build time. We
+# only use the standard `$1` action; no template tokens are required.
+
+set -e
+
+case "$1" in
+    configure)
+        LIST_FILE=/etc/apt/sources.list.d/kyc.list
+        EXAMPLE=/usr/share/doc/apt-transport-kyc/kyc.list
+
+        if [ ! -f "$LIST_FILE" ] && [ -f "$EXAMPLE" ]; then
+            cp "$EXAMPLE" "$LIST_FILE"
+            chmod 0644 "$LIST_FILE"
+            echo "apt-transport-kyc: registered $LIST_FILE"
+            echo "apt-transport-kyc: run 'sudo apt update' to refresh the index."
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

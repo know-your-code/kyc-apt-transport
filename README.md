@@ -48,10 +48,32 @@ and are not considered stable.
 
 ## Binary install
 
-The binary is shipped as a Debian package built by this repo's CI.
+The binary ships as a Debian package built by this repo's CI and
+published to `https://apt.knowyourco.de/install/`. The `.deb` bundles
+three things:
+
+- the apt-method binary at `/usr/lib/apt/methods/kyc`
+- the public GPG keyring at `/usr/share/keyrings/kyc-keyring.gpg`
+- an example sources list at `/usr/share/doc/apt-transport-kyc/kyc.list`
+
+On install, the `postinst` maintainer script copies the example list
+into `/etc/apt/sources.list.d/kyc.list`. So end-to-end, installing
+kyc on Debian/Ubuntu is two commands:
+
+```sh
+curl -fsSLO "https://apt.knowyourco.de/install/apt-transport-kyc_$(dpkg --print-architecture).deb"
+sudo apt install -y "./apt-transport-kyc_$(dpkg --print-architecture).deb"
+sudo apt update
+sudo apt install kyc
+```
+
+(`apt update` is a separate line because dpkg holds the apt lock
+during postinst — running `apt update` inside the maintainer script
+deadlocks.)
+
 See [SECURITY.md](./SECURITY.md) for the GPG signing trust model and
-[knowyourco.de/install/linux](https://knowyourco.de/install/linux)
-for end-user install docs.
+[knowyourco.de/download](https://knowyourco.de/download) for the
+end-user install copy.
 
 Supported Debian/Ubuntu versions: 11 (bullseye) / 20.04 (focal) and
 newer, because the `signed-by=` apt sources directive and subkey-
