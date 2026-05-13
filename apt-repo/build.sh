@@ -85,11 +85,17 @@ DISTS="$OUT_DIR/dists/$SUITE"
 rm -rf "$DISTS"
 mkdir -p "$DISTS"
 
-# Symlink the pool into OUT_DIR so apt-ftparchive emits filenames
-# relative to the apt root (pool/main/k/kyc/...) rather than to
-# POOL_DIR. apt clients fetch via `pool/...` relative to the suite root.
+# Symlink the pool into OUT_DIR under the suite prefix so the
+# Filename: paths apt-ftparchive emits match the per-suite R2 layout
+# (apt/pool/<suite>/<component>/<initial>/<name>/...). The worker
+# uses the leading `<suite>/` to decide whether to license-gate the
+# /pool/ path — bootstrap is always public, stable is gated. If we
+# emitted plain `pool/<component>/...` Filenames here, apt clients
+# would 404 at .deb download because they resolve Filename relative
+# to the source URI.
 rm -rf "$OUT_DIR/pool"
-ln -sfn "$(cd "$POOL_DIR" && pwd)" "$OUT_DIR/pool"
+mkdir -p "$OUT_DIR/pool/$SUITE"
+ln -sfn "$(cd "$POOL_DIR/main" && pwd)" "$OUT_DIR/pool/$SUITE/main"
 
 for arch in $ARCHITECTURES; do
   for component in $COMPONENTS; do
@@ -99,7 +105,7 @@ for arch in $ARCHITECTURES; do
     # apt-ftparchive packages walks the pool and emits a Packages
     # stanza per .deb, with size + checksums + Description.
     # --arch limits to one arch's .debs in this pool.
-    (cd "$OUT_DIR" && apt-ftparchive --arch="$arch" packages "pool/$component") \
+    (cd "$OUT_DIR" && apt-ftparchive --arch="$arch" packages "pool/$SUITE/$component") \
       > "$arch_dir/Packages"
     gzip -9 -kf "$arch_dir/Packages"
   done
