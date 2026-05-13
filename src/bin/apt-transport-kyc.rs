@@ -1,11 +1,18 @@
 //! `/usr/lib/apt/methods/kyc` — APT external method binary that
-//! handles the `kyc+https://` URL scheme.
+//! handles the `kyc://` URL scheme.
+//!
+//! apt resolves a URI scheme by looking up the method binary at
+//! `/usr/lib/apt/methods/<scheme>`; the scheme string and the binary
+//! filename must match. We use the plain scheme `kyc://` (not the
+//! compound `kyc+https://` form) so the binary at
+//! `methods/kyc` is found correctly. The transport always speaks
+//! HTTPS underneath — that's an internal implementation detail.
 //!
 //! Apt invokes this binary once per `apt update` / `apt install` and
 //! talks to it over stdin/stdout using the text protocol parsed by
 //! [`apt_transport_kyc::protocol`]. For each `600 URI Acquire`:
 //!
-//! 1. URL-decode the URI, rewrite `kyc+https://` → `https://`.
+//! 1. URL-decode the URI, rewrite `kyc://` → `https://`.
 //! 2. If the path is under `/dists/` or `/install/`, fetch
 //!    unauthenticated. If under `/pool/`, attach
 //!    `Authorization: Kyc-License <base64-of-license-file>` from
@@ -31,7 +38,7 @@ use apt_transport_kyc::protocol::{
 };
 use sha2::{Digest, Sha256, Sha512};
 
-const URL_SCHEME: &str = "kyc+https://";
+const URL_SCHEME: &str = "kyc://";
 const AUTH_HEADER_PREFIX: &str = "Kyc-License ";
 
 fn main() -> ExitCode {
