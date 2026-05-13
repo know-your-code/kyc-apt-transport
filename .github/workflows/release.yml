@@ -142,7 +142,7 @@ jobs:
           path: deb
           merge-multiple: true
 
-      - name: Upload to R2
+      - name: Upload .debs to R2 pool (bootstrap suite)
         if: steps.check.outputs.skip != 'true'
         shell: bash
         env:
@@ -152,8 +152,109 @@ jobs:
           R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
         run: |
           set -euo pipefail
+          # Two-suite design: apt-transport-kyc is the unlicensed
+          # bootstrap that gives apt the kyc:// scheme. It lives under
+          # the bootstrap suite's pool, which the worker serves over
+          # plain HTTPS with no license check.
           for f in deb/apt-transport-kyc_*.deb deb/apt-transport-kyc_*.deb.sha256; do
             base=$(basename "$f")
-            aws s3 cp "$f" "s3://${R2_BUCKET}/apt/install/${base}" \
+            aws s3 cp "$f" "s3://${R2_BUCKET}/apt/pool/bootstrap/main/a/apt-transport-kyc/${base}" \
               --endpoint-url "$R2_ENDPOINT" --no-progress
+          done
+
+  # Regenerate signed apt repo metadata for the `bootstrap` suite after
+  # publish-r2 uploads the new .debs. Downloads any older versions
+  # from R2 so they stay in the index, then runs apt-ftparchive +
+  # GPG-signs Release with the CI-resident subkey (same trust anchor
+  # as the kyc release pipeline — see SECURITY.md).
+  apt-repo-bootstrap:
+    name: apt-repo (bootstrap suite)
+    needs:
+      - plan
+      - publish-r2
+    if: ${{ needs.plan.outputs.publishing == 'true' && needs.publish-r2.result == 'success' }}
+    runs-on: ubuntu-22.04
+    env:
+      R2_BUCKET: kyc-releases
+      SUITE: bootstrap
+      COMPONENTS: main
+      ARCHITECTURES: amd64 arm64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Check secrets present
+        id: check
+        shell: bash
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          APT_SIGNING_SUBKEY_ASC_BASE64: ${{ secrets.APT_SIGNING_SUBKEY_ASC_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_ENDPOINT" ] || [ -z "$APT_SIGNING_SUBKEY_ASC_BASE64" ]; then
+            echo "::warning::R2 or GPG-signing secrets not configured; skipping apt-repo metadata refresh."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install apt-ftparchive + gpg
+        if: steps.check.outputs.skip != 'true'
+        run: sudo apt-get update && sudo apt-get install -y apt-utils gpg
+
+      - name: Sync existing pool from R2
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          mkdir -p pool/main/a/apt-transport-kyc
+          aws s3 sync "s3://${R2_BUCKET}/apt/pool/bootstrap/main/a/apt-transport-kyc/" pool/main/a/apt-transport-kyc/ \
+            --endpoint-url "$R2_ENDPOINT" \
+            --exclude '*' --include '*.deb' \
+            --no-progress || true
+          ls -la pool/main/a/apt-transport-kyc/ || true
+
+      - name: Build + sign apt repo metadata
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        env:
+          APT_SIGNING_SUBKEY_ASC_BASE64: ${{ secrets.APT_SIGNING_SUBKEY_ASC_BASE64 }}
+          APT_SIGNING_SUBKEY_PASSPHRASE: ${{ secrets.APT_SIGNING_SUBKEY_PASSPHRASE }}
+          POOL_DIR: ./pool
+          OUT_DIR: ./out
+        run: ./apt-repo/build.sh --sign --ci
+
+      - name: Upload signed metadata to R2
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          for f in out/dists/${SUITE}/main/binary-*/Packages \
+                   out/dists/${SUITE}/main/binary-*/Packages.gz; do
+            rel="${f#out/}"
+            aws s3 cp "$f" "s3://${R2_BUCKET}/apt/${rel}" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --content-type 'text/plain' \
+              --no-progress
+          done
+          for f in out/dists/${SUITE}/Release out/dists/${SUITE}/Release.gpg out/dists/${SUITE}/InRelease; do
+            if [ -f "$f" ]; then
+              rel="${f#out/}"
+              aws s3 cp "$f" "s3://${R2_BUCKET}/apt/${rel}" \
+                --endpoint-url "$R2_ENDPOINT" \
+                --content-type 'text/plain' \
+                --no-progress
+            fi
           done
