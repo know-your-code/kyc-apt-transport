@@ -94,9 +94,11 @@ hardcopy form. It is never uploaded online.
    `apt-transport-kyc` package to install both during a transition
    window (typically 1 year).
 4. Update the fingerprint here.
-5. Every existing apt source will fail until users rerun
-   `install.sh` to pick up the new primary's keyring. This is the
-   nuclear scenario; it is why the primary is offline + on hardware.
+5. Every existing apt source will fail until users re-fetch the
+   keyring (`curl -fsSL https://apt.knowyourco.de/install/kyc-keyring.gpg
+   -o /etc/apt/keyrings/kyc-keyring.gpg`) and trust the new
+   fingerprint. This is the nuclear scenario; it is why the primary
+   is offline + on hardware.
 
 ## Why GPG instead of cosign / sigstore / cloud KMS?
 
