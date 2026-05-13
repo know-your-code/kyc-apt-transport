@@ -1,0 +1,159 @@
+name: Release
+
+# Builds the bootstrap apt-transport-kyc .deb for amd64 + arm64 and
+# uploads to the same kyc-releases R2 bucket the kyc release pipeline
+# writes to. Two release cadences are kept separate by design:
+#
+#   - know-your-code releases (frequent) write to
+#     apt/pool/main/k/kyc/kyc_<v>_<arch>.deb
+#   - this repo's releases (rare — only when the transport changes)
+#     write to apt/install/apt-transport-kyc_<v>_<arch>.deb
+#
+# The bootstrap .deb is what users install before adding the apt
+# source — it can't be license-gated, so it's served publicly by the
+# apt worker at `/install/`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (vX.Y.Z), or 'dry-run' for a no-publish build"
+        required: true
+        default: dry-run
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      publishing: ${{ steps.plan.outputs.publishing }}
+      version-label: ${{ steps.plan.outputs.version-label }}
+    steps:
+      - id: plan
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$INPUT_TAG" == "dry-run" ]]; then
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "publishing=false" >> "$GITHUB_OUTPUT"
+            echo "version-label=dry-run-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$INPUT_TAG' is not a valid v<semver>." >&2
+            exit 1
+          fi
+          echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          echo "publishing=true" >> "$GITHUB_OUTPUT"
+          echo "version-label=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.arch }})
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-unknown-linux-gnu
+            cc: ""
+          - arch: arm64
+            target: aarch64-unknown-linux-gnu
+            cc: aarch64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross-compile toolchain
+        if: matrix.arch == 'arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build binary
+        env:
+          CC_aarch64_unknown_linux_gnu: ${{ matrix.cc }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cc }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Install cargo-deb
+        run: cargo install --locked --version 2.10.0 cargo-deb
+
+      - name: Build .deb
+        id: deb
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo deb --no-build --no-strip \
+                    --target ${{ matrix.target }}
+          DEB=$(ls target/${{ matrix.target }}/debian/apt-transport-kyc_*_${{ matrix.arch }}.deb)
+          echo "deb=$DEB" >> "$GITHUB_OUTPUT"
+          sha256sum "$DEB" > "$DEB.sha256"
+          dpkg-deb --info "$DEB"
+          dpkg-deb --contents "$DEB"
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: artifacts-deb-${{ matrix.arch }}
+          path: |
+            ${{ steps.deb.outputs.deb }}
+            ${{ steps.deb.outputs.deb }}.sha256
+          if-no-files-found: error
+
+  publish-r2:
+    name: publish-r2 (.deb)
+    needs:
+      - plan
+      - build
+    if: ${{ needs.plan.outputs.publishing == 'true' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      R2_BUCKET: kyc-releases
+    steps:
+      - name: Check R2 credentials
+        id: check
+        shell: bash
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          if [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_ENDPOINT" ]; then
+            echo "::warning::R2 secrets not configured; skipping upload."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download .deb artifacts
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: artifacts-deb-*
+          path: deb
+          merge-multiple: true
+
+      - name: Upload to R2
+        if: steps.check.outputs.skip != 'true'
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          for f in deb/apt-transport-kyc_*.deb deb/apt-transport-kyc_*.deb.sha256; do
+            base=$(basename "$f")
+            aws s3 cp "$f" "s3://${R2_BUCKET}/apt/install/${base}" \
+              --endpoint-url "$R2_ENDPOINT" --no-progress
+          done

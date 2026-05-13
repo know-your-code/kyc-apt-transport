@@ -1,0 +1,66 @@
+[package]
+name = "apt-transport-kyc"
+version = "0.1.0"
+edition = "2024"
+# Public OSS crate. MIT/Apache-2.0 is the conventional dual-license
+# for Rust crates and lets downstream packagers redistribute the
+# transport binary in their own repos without friction.
+license = "MIT OR Apache-2.0"
+description = "APT transport method binary + RFC 8628 device-flow client for kyc"
+repository = "https://github.com/know-your-code/kyc-apt-transport"
+keywords = ["apt", "debian", "kyc"]
+categories = ["command-line-utilities"]
+
+[lib]
+name = "apt_transport_kyc"
+
+[[bin]]
+name = "apt-transport-kyc"
+path = "src/bin/apt-transport-kyc.rs"
+
+# Feature gating for the optional browser-launcher dep. The library
+# half is consumed by kyc-cli (which enables `cli-ui` so the SSO
+# command can pop a browser tab) and by the apt-method binary in
+# this crate (which never launches a browser — apt's UI doesn't
+# benefit from it).
+[features]
+default = []
+cli-ui = ["dep:webbrowser"]
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+serde = { version = "1", features = ["derive"] }
+webbrowser = { version = "1", optional = true }
+# Used by license_store for getpwnam + chown. The passwd struct
+# layout differs on macOS vs glibc vs musl, so hand-rolling FFI here
+# is fragile — libc gives us the right layout per target for free.
+libc = "0.2"
+sha2 = "0.10"
+md-5 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+
+# cargo-deb metadata. Packages the apt-method binary as
+# `apt-transport-kyc_<v>_<arch>.deb`. The .deb drops the binary at
+# /usr/lib/apt/methods/kyc — that path is what apt auto-discovers
+# the `kyc+https://` URL scheme from.
+#
+# Keyring file (kyc-keyring.gpg) and sources.list example are added
+# in a follow-up commit once the air-gapped GPG ceremony has
+# produced the keyring artifact — keeping this initial scaffold
+# pure-Rust.
+[package.metadata.deb]
+name = "apt-transport-kyc"
+maintainer = "Botanica Software Labs <hello@knowyourco.de>"
+copyright = "2026, Botanica Software Labs"
+depends = "libc6, ca-certificates"
+section = "admin"
+priority = "optional"
+extended-description = """\
+Adds the kyc+https:// URL scheme to apt. After installing this
+package and adding the kyc apt source, `apt install kyc` fetches
+licensed packages via a license-file bearer credential instead of
+making the repo world-readable."""
+assets = [
+    ["target/release/apt-transport-kyc", "usr/lib/apt/methods/kyc", "755"],
+]
