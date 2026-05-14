@@ -14,5 +14,14 @@
 //! it via a `git=` dependency.
 
 pub mod device_flow;
-pub mod license_store;
 pub mod protocol;
+
+// `license_store` reaches for libc's getpwnam/chown and the
+// PermissionsExt / OsStrExt traits, all Unix-only. The apt-transport
+// binary that needs it is itself Unix-only (apt doesn't exist on
+// Windows), and the other consumer — kyc-cli, via this crate's
+// `cli-ui` feature — never touches license_store. So we gate it
+// here, otherwise Windows targets of kyc-cli fail to compile this
+// crate as a transitive dep.
+#[cfg(unix)]
+pub mod license_store;
